@@ -4,26 +4,22 @@
 #include <Adafruit_MotorShield.h>
 #include "utility/Adafruit_MS_PWMServoDriver.h"
 
-/*
- * Next to fix: it wil switch which limit to hit multiple times instead of once. 
- * Try: putting it all in the main loop insted of getting called. Or, changing logic of if/elses to somehow account for the outlier.
- * 
- */
-
 //constants
 const int AF_STEPPER_PORT = 2; //M3 and M4 of MotorShield
 const int STEPS_PER_REV = 200; //smaller stepper
 const int INCH_PER_REV = 1; //place holder val
 const int LIM_L = A0; //NC
 const int LIM_R = A1; //NC
+const int NEEDLE_DIST = 1; //distance between needles to determine width of rug
 
 const bool USE_CNC = false;
 
+bool yarnColor; //True = yarn1, False = yarn2
 bool manualStop;
+bool dir; //True = right, False = left
 int distToMove;
-int stepsToTake;
 int stepSpeed;
-int nextLim;
+int stepsToTake;
 
 Adafruit_MotorShield AFMS = Adafruit_MotorShield();
 Adafruit_StepperMotor *myStepper = AFMS.getStepper(STEPS_PER_REV, AF_STEPPER_PORT);
@@ -47,10 +43,10 @@ void setup() {
   pinMode(LIM_R, INPUT);
   
   manualStop = false;
+  dir = true; //start expecting to move right
   distToMove = 1000;//use later with math
   stepsToTake = 100;
-  stepSpeed = 50; 
-  nextLim = LIM_R; //which limit switch will get hit next
+  stepSpeed = 50;
 
   stepper.setCurrentPosition(stepper.currentPosition()); //set current pos to be the new 0
   stepper.setSpeed(stepSpeed);
@@ -87,35 +83,52 @@ void loop() {
 
 void afmsLoop() {
   
-  //if the limit to hit is unpressed and the stepper is moving, continue
-  if(analogRead(nextLim) == LOW && stepper.run()){
-    stepper.run();
-  }
-  //if the limit switch has been hit and the stepper is still running
-  else if(analogRead(nextLim) == HIGH && stepper.run()){
-    //stop the stepper
-    stepper.stop();
-    //wait for stepper to stop moving
-    while(stepper.run()){}
-  }
-  //if the stepper has stopped regardless of limit switch
-  //(analogRead(AF_LIMIT_PIN1) == HIGH || analogRead(AF_LIMIT_PIN1) == LOW)
-  else{
-    Serial.println("stepper no longer running");
-
-    //switch limit to hit
-    if(nextLim == LIM_L){
-      Serial.println("Switching to hit limit R (A1)");
-      nextLim = LIM_R;
+  //if carriage going right
+  if(dir){
+    //if carriage not at limit switch and not in pos
+    if(analogRead(LIM_R) == LOW && stepper.distanceToGo() != 0){
+      stepper.run();
+      Serial.println("Going to the right");
     }
+    //either at limit switch or hit target pos
     else{
-      Serial.println("Switching to hit limit L (A0)");
-      nextLim = LIM_L;
+      Serial.println("Reason to stop at right");
+      //if at switch, stop moving
+      if(stepper.distanceToGo() != 0){
+        stepper.stop();
+        //wait for stepper to stop moving
+        while(stepper.run()){}
+      }
+      Serial.println("Changing to left");
+      dir = !dir;
+      stepsToTake = -stepsToTake;
+      stepper.move(stepsToTake);
+      stepper.run();
     }
-    
-    stepsToTake = -stepsToTake;
-    stepper.move(stepsToTake);
-    stepper.run();
+  }
+  
+  //if carriage going left
+  if(!dir){
+    //if carriage not at limit switch and not in pos
+    if(analogRead(LIM_L) == LOW && stepper.distanceToGo() != 0){
+      Serial.println("Going to the left");
+      stepper.run();
+    }
+    //either at limit switch or hit target pos
+    else{
+      Serial.println("Reason to stop at left");
+      //if at switch, stop moving
+      if(stepper.distanceToGo() != 0){
+        stepper.stop();
+        //wait for stepper to stop moving
+        while(stepper.run()){}
+      }
+      Serial.println("Changing to right");
+      dir = !dir;
+      stepsToTake = -stepsToTake;
+      stepper.move(stepsToTake);
+      stepper.run();
+    }
   }
 }
 

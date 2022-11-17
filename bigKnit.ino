@@ -1,71 +1,59 @@
 #include <Wire.h>
-#include <ezButton.h>
 #include <AccelStepper.h>
-#include <Adafruit_MotorShield.h>
-//#include <Adafruit_PWMServoDriver.h>
+#include <Adafruit_PWMServoDriver.h>
 
 //constants - motors
-const int SERVO_DOWN = 600; // This is the rounded 'minimum' microsecond length based on the minimum pulse of 150
-const int SERVO_UP = 2400; // This is the rounded 'maximum' microsecond length based on the maximum pulse of 600
+const int SERVO_MIN = 500; // This is the rounded 'minimum' microsecond length based on the minimum pulse of 150
+const int SERVO_MAX = 2000; // This is the rounded 'maximum' microsecond length based on the maximum pulse of 600
 const int SERVO_FREQ = 50; // Analog servos run at ~50 Hz updates
-const int YARN_SERVO = 0;
-const int AF_STEPPER_PORT = 2; //M3 and M4 of MotorShield
+const int YARN_SERVO = 0; //pin on servo driver
 const int STEPS_PER_REV = 200; //smaller stepper
-const int INCH_PER_REV = 1; //place holder val
+const int INCH_PER_REV = 1; //placeholder
+
+//Stepper Driver
+//placeholders for digital pins for step and dir connection
+const int DIR = 3; 
+const int STEP = 2;
+const int INTERFACE = 1; //interface type as defined in accelStepper
 
 //constants - misc
 const int LIM_L = A0; //NC
 const int LIM_R = A1; //NC
 const int NEEDLE_DIST = 1; //distance between needles to determine width of rug
-const bool USE_CNC = false;
+const int NUM_NEEDLES = 4;
 
-bool yarnColor; //True = yarn1, False = yarn2
 bool manualStop;
 bool dir; //True = right, False = left
-int distToMove;
 int stepSpeed;
 int stepsToTake;
+int lastPwm;
 
-// called this way, it uses the default address 0x40
-//Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
-
-Adafruit_MotorShield AFMS = Adafruit_MotorShield();
-Adafruit_StepperMotor *myStepper = AFMS.getStepper(STEPS_PER_REV, AF_STEPPER_PORT);
-
-void forwardStep() {
-  myStepper->onestep(FORWARD, SINGLE);
-}
-void backwardStep() {
-  myStepper->onestep(BACKWARD, SINGLE);
-}
-
-AccelStepper stepper(forwardStep, backwardStep);
+Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
+AccelStepper stepper = AccelStepper(INTERFACE, STEP, DIR);
 
 void setup() {
-  if (!USE_CNC) {
-    AFMS.begin();
-  }
   
   Serial.begin(9600);
-
-  /*Adjust these. Using example values*/
-//  pwm.begin();
-//  pwm.setOscillatorFrequency(27000000);
-//  pwm.setPWMFreq(50);  // Analog servos run at ~50 Hz updates
-
-  delay(10);
-
+  
   pinMode(LIM_L, INPUT);
   pinMode(LIM_R, INPUT);
 
   manualStop = false;
   dir = true; //start expecting to move right
-  distToMove = 1000;//use later with math
-  stepsToTake = 100;
   stepSpeed = 50;
+  lastPwm = 0;
+
+  int totalDist = NUM_NEEDLES + NEEDLE_DIST;
+  stepsToTake = totalDist/double(INCH_PER_REV/STEPS_PER_REV);
+
+  pwm.begin();
+  pwm.setOscillatorFrequency(25000000);
+  pwm.setPWMFreq(50);  // Analog servos run at ~50 Hz updates
 
   stepper.setCurrentPosition(stepper.currentPosition()); //set current pos to be the new 0
   stepper.setSpeed(stepSpeed);
+
+  delay(10);
 }
 
 void loop() {
@@ -87,31 +75,12 @@ void loop() {
   }
 
   if (!manualStop) {
-    if (USE_CNC) {
-      cncLoop();
-    }
-    else {
-      afmsKnitRow(3, true);
-    }
+    knitRow(3);
   }
 
 }
 
-void afmsKnitRow(int numRows, bool yarnColor) {
-
-  //REFACTOR: set boolean to check changeYarnColor in which case it will only move if it needs to. Read current position and change accordingly
-  //set yarn color
-//  if(yarnColor){
-//    for (uint16_t pulselen = SERVO_DOWN; pulselen < SERVO_UP; pulselen++) {
-//    pwm.setPWM(YARN_SERVO, 0, pulselen);
-//    }
-//  }
-//  else{
-//    for (uint16_t pulselen = SERVO_UP; pulselen < SERVO_DOWN; pulselen++) {
-//    pwm.setPWM(YARN_SERVO, 0, pulselen);
-//    }
-//  }
-  
+void knitRow(int numRows) {
   for (int i = 0; i < numRows; i++) {
     Serial.print("Row: ");
     Serial.println(i);
@@ -154,11 +123,27 @@ void afmsKnitRow(int numRows, bool yarnColor) {
   Serial.println("rows");
 }
 
+void changeYarn(){
+  uint16_t microsec;
+  if(lastPwm < SERVO_MAX){
+    for (microsec = SERVO_MIN; microsec < SERVO_MAX; microsec++) {
+      pwm.writeMicroseconds(YARN_SERVO, microsec);
+    }
+    lastPwm = microsec;
+  }
+  else{
+    for (microsec = SERVO_MAX; microsec > SERVO_MIN; microsec--) {
+      pwm.writeMicroseconds(YARN_SERVO, microsec);
+    }
+    lastPwm = microsec;
+  }
 
-void cncLoop()  {
-  //insert cnc code here
 }
 
-void homing() {}
+void castOn() {
+  //use servo min and max and oscillate between the two at a specific interval
+  //only move horizontally across once
+  //use pre-determined stepsToTake, calculated by number of needles and dist between them
+  }
 
-void knitSingleRow() {}
+void homing() {}

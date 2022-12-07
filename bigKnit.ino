@@ -1,83 +1,124 @@
-#include <Wire.h>
 #include <AccelStepper.h>
-#include <Adafruit_PWMServoDriver.h>
 
-//constants - motors
-const int SERVO_MIN = 500; // This is the rounded 'minimum' microsecond length based on the minimum pulse of 150
-const int SERVO_MAX = 2000; // This is the rounded 'maximum' microsecond length based on the maximum pulse of 600
-const int SERVO_FREQ = 50; // Analog servos run at ~50 Hz updates
-const int YARN_SERVO = 0; //pin on servo driver
-const int STEPS_PER_REV = 200; //smaller stepper
-const int INCH_PER_REV = 1; //placeholder
+#define directionPin 3  
+#define stepPin 2
+#define enablePin 4
+#define motorInterfaceType 1
 
-//Stepper Driver
-//placeholders for digital pins for step and dir connection
-const int DIR = 3; 
-const int STEP = 2;
-const int INTERFACE = 1; //interface type as defined in accelStepper
+// Define a stepper and the pins it will use
+AccelStepper stepper = AccelStepper(motorInterfaceType, stepPin, directionPin); // Defaults to AccelStepper::FULL4WIRE (4 pins) on 2, 3, 4, 5
 
-//constants - misc
-const int LIM_L = A0; //NC
-const int LIM_R = A1; //NC
-const int NEEDLE_DIST = 1; //distance between needles to determine width of rug
-const int NUM_NEEDLES = 4;
+const int leftLimitSwitchPin = 7;
+const int rightLimitSwitchPin = 8;
+//placeholders
+const int needle_dist = 1;
+const int stepper_diameter = 2;
+const int steps_per_rev = 200;
 
-bool manualStop;
-bool dir; //True = right, False = left
-int stepSpeed;
-int stepsToTake;
-int lastPwm;
 
-Adafruit_PWMServoDriver pwm = Adafruit_PWMServoDriver();
-AccelStepper stepper = AccelStepper(INTERFACE, STEP, DIR);
+long initial_homing=-1;
+int stepsToTake = 10000;
+
+int rugWidth;
+int rugLength;
 
 void setup() {
-  
   Serial.begin(9600);
   
-  pinMode(LIM_L, INPUT);
-  pinMode(LIM_R, INPUT);
+  pinMode(enablePin, OUTPUT);
+  digitalWrite(enablePin, LOW);
 
-  manualStop = false;
-  dir = true; //start expecting to move right
-  stepSpeed = 50;
-  lastPwm = 0;
+  pinMode(leftLimitSwitchPin, INPUT_PULLUP);
 
-  int totalDist = NUM_NEEDLES + NEEDLE_DIST;
-  stepsToTake = totalDist/double(INCH_PER_REV/STEPS_PER_REV);
+  home();
 
-  pwm.begin();
-  pwm.setOscillatorFrequency(25000000);
-  pwm.setPWMFreq(50);  // Analog servos run at ~50 Hz updates
-
-  stepper.setCurrentPosition(stepper.currentPosition()); //set current pos to be the new 0
-  stepper.setSpeed(stepSpeed);
-
-  delay(10);
+  getUserValues();
+  //calculateValues(10);
 }
 
 void loop() {
+  knitRow(rugLength);
+}
 
-  //infrastructure for commands
-  if (Serial.available() > 0) {
-    String str = Serial.readString();
-    str.trim();
-    if (str == "home") {
-      Serial.println("homing");
-    }
-    else if (str == "knit") {
-      Serial.println("knitting");
-    }
-    else if (str == "stop") {
-      manualStop = true;
-      stepper.stop();
-    }
+void home(){
+  delay(5);  // Wait for EasyDriver wake up
+
+   //  Set Max Speed and Acceleration of each Steppers at startup for homing
+  stepper.setMaxSpeed(100.0);      // Set Max Speed of Stepper (Slower to get better accuracy)
+  stepper.setAcceleration(100.0);  // Set Acceleration of Stepper
+ 
+
+// Start Homing procedure of Stepper Motor at startup
+
+  Serial.print("Stepper is Homing . . . . . . . . . . . ");
+
+  while (digitalRead(leftLimitSwitchPin)) {  // Make the Stepper move CCW until the switch is activated   
+    stepper.moveTo(initial_homing);  // Set the position to move to
+    initial_homing--;  // Decrease by 1 for next move if needed
+    stepper.run();  // Start moving the stepper
+    delay(5);
   }
 
-  if (!manualStop) {
-    knitRow(3);
-  }
+  stepper.setCurrentPosition(0);  // Set the current position as zero for now
+  stepper.setMaxSpeed(100.0);      // Set Max Speed of Stepper (Slower to get better accuracy)
+  stepper.setAcceleration(100.0);  // Set Acceleration of Stepper
+  initial_homing=1;
 
+  while (!digitalRead(leftLimitSwitchPin)) { // Make the Stepper move CW until the switch is deactivated
+    stepper.moveTo(initial_homing);  
+    stepper.run();
+    initial_homing++;
+    delay(5);
+  }
+  
+  stepper.setCurrentPosition(0);
+  Serial.println("Homing Completed");
+  Serial.println("");
+  stepper.setMaxSpeed(1000.0);      // Set Max Speed of Stepper (Faster for regular movements)
+  stepper.setAcceleration(1000.0);
+
+  delay(5000);
+}
+
+void getUserValues(){
+  Serial.println("Enter your desired rug width");
+  while(Serial.available() == 0) {}
+  rugWidth = readSerial();
+  
+  Serial.println("Width: ");
+  Serial.println(rugWidth);   // Do something with the value
+    
+  Serial.println("Enter your desired rug length");
+  while(Serial.available() == 0) {}
+  rugLength = readSerial();
+  
+  Serial.println("Length: ");
+  Serial.println(rugLength);   // Do something with the value
+}
+
+int readSerial(){
+  int val = 0;
+  while(1) {        // force into a loop until new line received
+    int incomingByte = Serial.read();
+    if (incomingByte == '\n') break;   // exit the while(1), we're done receiving
+    if (incomingByte == -1) continue;  // if no characters are in the buffer read() returns -1
+    val *= 10;  // shift left 1 decimal place
+    // convert ASCII to integer, add, and shift left 1 decimal place
+    val = ((incomingByte - 48) + val);
+  }
+  return val;
+}
+
+void calculateValues(int rugWidth){
+  //program will err on the shorter side of the desired width
+  int numNeedles =  (int)(rugWidth/needle_dist)+1;
+  double r = stepper_diameter/2.0;
+  //can change the buffer distance
+  double totalDist = (numNeedles + 1) * needle_dist;
+  //double theta = 360.0/STEPS_PER_REV;
+  //arc length = (theta/360)*r2pi
+  double distPerStep = (1/steps_per_rev)*r*2*3.14159;
+  stepsToTake = totalDist/distPerStep;
 }
 
 void knitRow(int numRows) {
@@ -85,65 +126,17 @@ void knitRow(int numRows) {
     Serial.print("Row: ");
     Serial.println(i);
 
-    //if carriage going right
-    if (dir) {
-      //if carriage not at limit switch and not in pos
-      while (analogRead(LIM_R) == LOW && stepper.distanceToGo() != 0) {
-        stepper.run();
-      }
-      //either at limit switch or hit target pos
-      //if at switch, stop moving
-      if (stepper.distanceToGo() != 0) {
-        stepper.stop();
-        //wait for stepper to stop moving
-        while (stepper.run()) {}
-      }
-      dir = !dir;
-      stepsToTake = -stepsToTake;
-      stepper.move(stepsToTake);
+    stepper.moveTo(stepsToTake);
+
+    while(stepper.distanceToGo() != 0) {
+      stepper.run();
     }
-    else { //if carriage going left
-      //if carriage not at limit switch and not in pos
-      while (analogRead(LIM_L) == LOW && stepper.distanceToGo() != 0) {
-        stepper.run();
-      }
-      //if at switch, stop moving
-      if (stepper.distanceToGo() != 0) {
-        stepper.stop();
-        //wait for stepper to stop moving
-        while (stepper.run()) {}
-      }
-      dir = !dir;
-      stepsToTake = -stepsToTake;
-      stepper.move(stepsToTake);
-    }
+    
+    stepsToTake = -stepsToTake;
   }
+  
   Serial.print("Done knitting ");
   Serial.print(numRows);
-  Serial.println("rows");
+  Serial.println(" rows");
+  delay(3000);
 }
-
-void changeYarn(){
-  uint16_t microsec;
-  if(lastPwm < SERVO_MAX){
-    for (microsec = SERVO_MIN; microsec < SERVO_MAX; microsec++) {
-      pwm.writeMicroseconds(YARN_SERVO, microsec);
-    }
-    lastPwm = microsec;
-  }
-  else{
-    for (microsec = SERVO_MAX; microsec > SERVO_MIN; microsec--) {
-      pwm.writeMicroseconds(YARN_SERVO, microsec);
-    }
-    lastPwm = microsec;
-  }
-
-}
-
-void castOn() {
-  //use servo min and max and oscillate between the two at a specific interval
-  //only move horizontally across once
-  //use pre-determined stepsToTake, calculated by number of needles and dist between them
-  }
-
-void homing() {}

@@ -39,7 +39,7 @@ struct limitState{
 limitState limit;
 
 long initial_homing = -1;
-int bedLength = 28000;
+int stepsToTake = 28000;
 
 int rugWidth;
 int rugLength;
@@ -58,10 +58,10 @@ void setup() {
   
   fastHome(-1);
 
-  stepper.setMaxSpeed(20000);
-  stepper.setAcceleration(20000);
+  stepper.setMaxSpeed(10000);
+  stepper.setAcceleration(10000);
 
-  row.steps = bedLength;
+  row.steps = stepsToTake;
 
   row.start = true;
 

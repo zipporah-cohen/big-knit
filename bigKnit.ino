@@ -1,4 +1,5 @@
 #include <AccelStepper.h>
+#include <ezButton.h>
 
 #define directionPin 3  
 #define stepPin 2
@@ -8,44 +9,144 @@
 // Define a stepper and the pins it will use
 AccelStepper stepper = AccelStepper(motorInterfaceType, stepPin, directionPin); // Defaults to AccelStepper::FULL4WIRE (4 pins) on 2, 3, 4, 5
 
-const int leftLimitSwitchPin = 7;
-const int rightLimitSwitchPin = 8;
+const int leftLimitSwitchPin = 8;
+const int rightLimitSwitchPin = 7;
 //placeholders
 const int needle_dist = 1;
 const int stepper_diameter = 2;
 const int steps_per_rev = 200;
 
+ezButton leftLimitSwitch(leftLimitSwitchPin);
+ezButton rightLimitSwitch(rightLimitSwitchPin);
 
-long initial_homing=-1;
-int stepsToTake = 10000;
+struct machineState{
+  bool crashed = false;
+};
+machineState machine;
+
+struct rowState{
+  int n = 0;
+  bool start = false;
+  int steps = 0;
+};
+rowState row;
+
+struct limitState{
+  bool left = false;
+  bool right = false;
+};
+
+limitState limit;
+
+long initial_homing = -1;
+int bedLength = 28000;
 
 int rugWidth;
 int rugLength;
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
   
   pinMode(enablePin, OUTPUT);
   digitalWrite(enablePin, LOW);
+  
+  leftLimitSwitch.setDebounceTime(50);
+  rightLimitSwitch.setDebounceTime(50);
 
-  pinMode(leftLimitSwitchPin, INPUT_PULLUP);
+  stepper.setMaxSpeed(2000);
+  stepper.setAcceleration(5000);
+  
+  fastHome(-1);
 
-  home();
+  stepper.setMaxSpeed(20000);
+  stepper.setAcceleration(20000);
 
-  getUserValues();
+  row.steps = bedLength;
+
+  row.start = true;
+
+  //getUserValues();
   //calculateValues(10);
 }
 
 void loop() {
-  knitRow(rugLength);
+  leftLimitSwitch.loop();
+  rightLimitSwitch.loop();
+  knitRowState(10);
 }
 
-void home(){
-  delay(5);  // Wait for EasyDriver wake up
+void knitRowState(int numRows) {
+  limit.left = leftLimitSwitch.getState();
+  limit.right = rightLimitSwitch.getState();
+
+  if (row.start){
+    Serial.print("starting row: ");
+    Serial.println(row.n);
+    stepper.moveTo(row.steps);
+    row.start = false;
+  }
+
+  if(stepper.distanceToGo() == 0){
+    if(row.n < numRows){
+      row.n ++;
+      if(row.n % 2 == 0){
+        row.steps = stepsToTake;
+        row.start = true;
+        Serial.println(", knitting forwards");
+      }else{
+        row.steps = 100;
+        row.start = true;
+        Serial.println(", knitting backwards");
+      }
+    }
+  }
+
+  if (limit.left || limit.right){
+    if(!machine.crashed){
+      Serial.println("crash!!");
+      machine.crashed = true;
+      digitalWrite(enablePin,HIGH);
+    }
+  }else {
+    if(machine.crashed){
+      machine.crashed = false;
+      digitalWrite(enablePin,LOW);
+    }
+    stepper.run();
+  }
+}
+
+void fastHome(int direction){
+
+  stepper.moveTo(100000*direction);
+  
+  while(rightLimitSwitch.getStateRaw() == LOW) {
+    stepper.run();
+  }
+  stepper.stop(); // Stop as fast as possible 
+    Serial.println("motor at low end with limit switch touched");  // uncomment for debug 
+
+  stepper.moveTo(100*-direction);
+
+  while(rightLimitSwitch.getStateRaw() == LOW) {
+    stepper.run();
+  }
+    stepper.stop(); // Stop as fast as possible 
+    Serial.println("motor at low end with limit switch not touched"); // uncomment for debug 
+    
+  stepper.setCurrentPosition(0);
+  stepper.setMaxSpeed(10000.0);      // Set Max Speed of Stepper (Faster for regular movements)
+  stepper.setAcceleration(10000.0);
+  stepper.runToNewPosition(200);
+
+  delay(1000);
+}
+
+void home() {
 
    //  Set Max Speed and Acceleration of each Steppers at startup for homing
-  stepper.setMaxSpeed(100.0);      // Set Max Speed of Stepper (Slower to get better accuracy)
-  stepper.setAcceleration(100.0);  // Set Acceleration of Stepper
+  stepper.setMaxSpeed(10000.0);      // Set Max Speed of Stepper (Slower to get better accuracy)
+  stepper.setAcceleration(10000.0);  // Set Acceleration of Stepper
  
 
 // Start Homing procedure of Stepper Motor at startup
@@ -54,7 +155,7 @@ void home(){
 
   while (digitalRead(leftLimitSwitchPin)) {  // Make the Stepper move CCW until the switch is activated   
     stepper.moveTo(initial_homing);  // Set the position to move to
-    initial_homing--;  // Decrease by 1 for next move if needed
+    initial_homing ++ ;  // Decrease by 1 for next move if needed
     stepper.run();  // Start moving the stepper
     delay(5);
   }
@@ -68,16 +169,17 @@ void home(){
     stepper.moveTo(initial_homing);  
     stepper.run();
     initial_homing++;
-    delay(5);
+    // delay(5);
   }
   
   stepper.setCurrentPosition(0);
   Serial.println("Homing Completed");
   Serial.println("");
-  stepper.setMaxSpeed(1000.0);      // Set Max Speed of Stepper (Faster for regular movements)
-  stepper.setAcceleration(1000.0);
+  stepper.setMaxSpeed(10000.0);      // Set Max Speed of Stepper (Faster for regular movements)
+  stepper.setAcceleration(10000.0);
+  stepper.runToNewPosition(-200);
 
-  delay(5000);
+  delay(1000);
 }
 
 void getUserValues(){
@@ -94,6 +196,10 @@ void getUserValues(){
   
   Serial.println("Length: ");
   Serial.println(rugLength);   // Do something with the value
+
+  row.steps = 100*rugLength;
+
+  row.start = true;
 }
 
 int readSerial(){
@@ -118,7 +224,7 @@ void calculateValues(int rugWidth){
   //double theta = 360.0/STEPS_PER_REV;
   //arc length = (theta/360)*r2pi
   double distPerStep = (1/steps_per_rev)*r*2*3.14159;
-  stepsToTake = totalDist/distPerStep;
+  row.steps = totalDist/distPerStep;
 }
 
 void knitRow(int numRows) {
@@ -130,6 +236,10 @@ void knitRow(int numRows) {
 
     while(stepper.distanceToGo() != 0) {
       stepper.run();
+      if (digitalRead(leftLimitSwitchPin) || digitalRead(rightLimitSwitchPin)){
+        Serial.println("crash!!");
+        break;
+      }
     }
     
     stepsToTake = -stepsToTake;

@@ -39,7 +39,7 @@ struct limitState{
 limitState limit;
 
 long initial_homing = -1;
-int stepsToTake = 28000;
+int BedLength = 28000;
 
 int rugWidth;
 int rugLength;
@@ -61,7 +61,7 @@ void setup() {
   stepper.setMaxSpeed(10000);
   stepper.setAcceleration(10000);
 
-  row.steps = stepsToTake;
+  row.steps = BedLength;
 
   row.start = true;
 
@@ -72,7 +72,7 @@ void setup() {
 void loop() {
   leftLimitSwitch.loop();
   rightLimitSwitch.loop();
-  knitRowState(10);
+  knitRowState(1000);
 }
 
 void knitRowState(int numRows) {
@@ -90,7 +90,7 @@ void knitRowState(int numRows) {
     if(row.n < numRows){
       row.n ++;
       if(row.n % 2 == 0){
-        row.steps = stepsToTake;
+        row.steps = BedLength;
         row.start = true;
         Serial.println(", knitting forwards");
       }else{
@@ -225,28 +225,4 @@ void calculateValues(int rugWidth){
   //arc length = (theta/360)*r2pi
   double distPerStep = (1/steps_per_rev)*r*2*3.14159;
   row.steps = totalDist/distPerStep;
-}
-
-void knitRow(int numRows) {
-  for (int i = 0; i < numRows; i++) {
-    Serial.print("Row: ");
-    Serial.println(i);
-
-    stepper.moveTo(stepsToTake);
-
-    while(stepper.distanceToGo() != 0) {
-      stepper.run();
-      if (digitalRead(leftLimitSwitchPin) || digitalRead(rightLimitSwitchPin)){
-        Serial.println("crash!!");
-        break;
-      }
-    }
-    
-    stepsToTake = -stepsToTake;
-  }
-  
-  Serial.print("Done knitting ");
-  Serial.print(numRows);
-  Serial.println(" rows");
-  delay(3000);
 }

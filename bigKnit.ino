@@ -11,6 +11,7 @@ AccelStepper stepper = AccelStepper(motorInterfaceType, stepPin, directionPin); 
 
 const int leftLimitSwitchPin = 8;
 const int rightLimitSwitchPin = 7;
+
 //placeholders
 const int needle_dist = 1;
 const int stepper_diameter = 2;
@@ -39,7 +40,9 @@ struct limitState{
 limitState limit;
 
 long initial_homing = -1;
-int BedLength = 28000;
+int BedLength = 22000;
+int BedStart = 300;
+int BedEnd = 22800;
 
 int rugWidth;
 int rugLength;
@@ -58,10 +61,10 @@ void setup() {
   
   fastHome(-1);
 
-  stepper.setMaxSpeed(10000);
-  stepper.setAcceleration(10000);
+  stepper.setMaxSpeed(5000);
+  stepper.setAcceleration(5000);
 
-  row.steps = BedLength;
+  row.steps = BedEnd;
 
   row.start = true;
 
@@ -90,11 +93,11 @@ void knitRowState(int numRows) {
     if(row.n < numRows){
       row.n ++;
       if(row.n % 2 == 0){
-        row.steps = BedLength;
+        row.steps = BedStart;
         row.start = true;
         Serial.println(", knitting forwards");
       }else{
-        row.steps = 100;
+        row.steps = BedEnd;
         row.start = true;
         Serial.println(", knitting backwards");
       }
